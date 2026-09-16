@@ -248,12 +248,36 @@ void (*fn)(const char *key, void *value, void *ctx),
 void *ctx){
     foreach_inorder(t->root, fn, ctx);
 }
-/* NOTE: only checks BST key ordering; root-color, and
- * black-height invariants are not yet checked */
+/* Returns the black-height of the subtree rooted at node (number of black
+ * nodes on any root-to-NULL path, not counting node itself), or -1 if the
+ * subtree already violates the equal-black-height invariant. */
+static int black_height(const struct rbnode *node) {
+    if (node == NULL) {
+        return 0;
+    }
+    int left_bh = black_height(node->left);
+    if (left_bh < 0) {
+        return -1;
+    }
+    int right_bh = black_height(node->right);
+    if (right_bh < 0) {
+        return -1;
+    }
+    if (left_bh != right_bh) {
+        return -1;
+    }
+    return left_bh + (node->color == RB_BLACK ? 1 : 0);
+}
+
 int rb_validate(const rbtree_t *t) {
-    //TODO check black height
     if (t->root == NULL) {
         return 0;
+    }
+    if (t->root->color == RB_RED) {
+        return -1;
+    }
+    if (black_height(t->root) < 0) {
+        return -1;
     }
 
     struct rbnode **stack = malloc(t->size * sizeof *stack);
@@ -263,9 +287,6 @@ int rb_validate(const rbtree_t *t) {
 
     size_t top = 0;
     struct rbnode *cur = t->root;
-    if(cur->color == RB_RED){
-        return -1;
-    }
     const char *prev_key = NULL;
     int result = 0;
 
@@ -280,10 +301,9 @@ int rb_validate(const rbtree_t *t) {
             result = -1;
             break;
         }
-        if(cur->color == RB_RED && cur->parent !=NULL){
-            if(cur->parent->color == RB_RED){
-                return -1;
-            }
+        if (cur->color == RB_RED && cur->parent != NULL && cur->parent->color == RB_RED) {
+            result = -1;
+            break;
         }
         prev_key = cur->key;
         cur = cur->right;
