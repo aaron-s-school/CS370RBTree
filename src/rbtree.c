@@ -242,6 +242,7 @@ void *ctx){
  * black-height invariants are not yet checked (rb_insert has no
  * rebalancing yet, so those checks aren't meaningful until it does). */
 int rb_validate(const rbtree_t *t) {
+    //TODO check black height
     if (t->root == NULL) {
         return 0;
     }

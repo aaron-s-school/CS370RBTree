@@ -230,6 +230,59 @@ static void test_insert_fixup_cascading_recolor(void) {
     rb_destroy(t);
 }
 
+static void test_insert_no_stale_root_after_left_rotation(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    /* Ascending "10","20","30" forces rotate_left to move "20" above the
+     * original root "10". If a rotation ever forgot to update t->root,
+     * "20"/"30" would become unreachable from the (stale) root -- and
+     * rb_validate wouldn't necessarily notice, since it never cross-checks
+     * the number of nodes it visits against rb_size(). The two inserts
+     * after the rotation also confirm later rb_insert calls search from
+     * the updated root, not a cached/stale one. */
+    const char *keys[] = { "10", "20", "30", "05", "40" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted, each valued by its own key pointer */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], (void *)keys[i]) == 0);
+    }
+
+    /* invariant: keys[0..i) have already been confirmed reachable from the (possibly rotated) root */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_find(t, keys[i]) == (void *)keys[i]);
+    }
+    CHECK(rb_size(t) == n);
+    CHECK(rb_validate(t) == 0);
+
+    rb_destroy(t);
+}
+
+static void test_insert_no_stale_root_after_right_rotation(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    /* Mirror of the left-rotation case: descending "30","20","10" forces
+     * rotate_right to move "20" above the original root "30". */
+    const char *keys[] = { "30", "20", "10", "40", "05" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted, each valued by its own key pointer */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], (void *)keys[i]) == 0);
+    }
+
+    /* invariant: keys[0..i) have already been confirmed reachable from the (possibly rotated) root */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_find(t, keys[i]) == (void *)keys[i]);
+    }
+    CHECK(rb_size(t) == n);
+    CHECK(rb_validate(t) == 0);
+
+    rb_destroy(t);
+}
+
 /* Allocation-failure paths (rb_insert returning -1) aren't practically
  * testable without fault-injecting malloc, so they're intentionally not
  * covered here. */
@@ -254,6 +307,8 @@ static const test_case_t tests[] = {
     { "insert_fixup_zigzag_right_left",           test_insert_fixup_zigzag_right_left },
     { "insert_fixup_recolor_case",                test_insert_fixup_recolor_case },
     { "insert_fixup_cascading_recolor",           test_insert_fixup_cascading_recolor },
+    { "insert_no_stale_root_after_left_rotation", test_insert_no_stale_root_after_left_rotation },
+    { "insert_no_stale_root_after_right_rotation", test_insert_no_stale_root_after_right_rotation },
 };
 
 static const size_t num_tests = sizeof tests / sizeof tests[0];
