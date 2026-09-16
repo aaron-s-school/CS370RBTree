@@ -208,23 +208,183 @@ fail_node:
     free(key_copy);
     return -1;
 }
-void *rb_find(const rbtree_t *t, const char *key) {
+static struct rbnode *find_node_by_key(const rbtree_t *t, const char *key) {
     struct rbnode *cur = t->root;
 
     /* invariant: cur is the still-unsearched subtree that may hold key */
     while (cur != NULL) {
         int cmp = strcmp(key, cur->key);
         if (cmp == 0) {
-            return cur->value;
+            return cur;
         }
         cur = (cmp < 0) ? cur->left : cur->right;
     }
     return NULL;
 }
-int rb_delete(rbtree_t *t, const char *key){
-    (void)t;
-    (void)key;
-    return -1;
+
+void *rb_find(const rbtree_t *t, const char *key) {
+    struct rbnode *node = find_node_by_key(t, key);
+    return (node == NULL) ? NULL : node->value;
+}
+
+/* Precondition: subtree_root != NULL. */
+static struct rbnode *leftmost_node(struct rbnode *subtree_root) {
+    struct rbnode *cur = subtree_root;
+
+    /* invariant: every node walked past so far had a left child, so the true
+     * leftmost node is still reachable from cur */
+    while (cur->left != NULL) {
+        cur = cur->left;
+    }
+    return cur;
+}
+
+/* Relinks new_subtree into old_subtree's place under old_subtree's parent
+ * (or as t->root). new_subtree may be NULL; old_subtree may not. Does not
+ * touch old_subtree's own child/parent pointers. */
+static void replace_in_parent(rbtree_t *t, struct rbnode *old_subtree, struct rbnode *new_subtree) {
+    if (old_subtree->parent == NULL) {
+        t->root = new_subtree;
+    } else if (old_subtree == old_subtree->parent->left) {
+        old_subtree->parent->left = new_subtree;
+    } else {
+        old_subtree->parent->right = new_subtree;
+    }
+
+    if (new_subtree != NULL) {
+        new_subtree->parent = old_subtree->parent;
+    }
+}
+
+static rb_color_t effective_color(const struct rbnode *node) {
+    return (node == NULL) ? RB_BLACK : node->color;
+}
+
+/* doubly_black_node may be NULL (a black NULL "leaf" going double-black),
+ * which is why its parent is passed explicitly rather than read off it. */
+static void rb_delete_fixup(rbtree_t *t, struct rbnode *doubly_black_node, struct rbnode *doubly_black_parent) {
+    /* invariant: doubly_black_node carries one extra unit of black-height its
+     * subtree is missing; doubly_black_parent is tracked explicitly because
+     * doubly_black_node may be NULL. sibling is never NULL here -- if it
+     * were, its side would have less black-height than doubly_black_node's
+     * side, contradicting that the tree was valid before deletion. */
+    while (doubly_black_node != t->root && effective_color(doubly_black_node) == RB_BLACK) {
+        if (doubly_black_node == doubly_black_parent->left) {
+            struct rbnode *sibling = doubly_black_parent->right;
+
+            if (sibling->color == RB_RED) {
+                /* case 1: red sibling -> rotate so the new sibling is black, then fall through */
+                rb_node_recolor_black(sibling);
+                rb_node_recolor_red(doubly_black_parent);
+                rotate_left(t, doubly_black_parent);
+                sibling = doubly_black_parent->right;
+            }
+
+            if (effective_color(sibling->left) == RB_BLACK && effective_color(sibling->right) == RB_BLACK) {
+                /* case 2: both nephews black -> recolor sibling red, push the double-black up */
+                rb_node_recolor_red(sibling);
+                doubly_black_node = doubly_black_parent;
+                doubly_black_parent = doubly_black_parent->parent;
+            } else {
+                if (effective_color(sibling->right) == RB_BLACK) {
+                    /* case 3: near nephew red, far nephew black -> rotate to convert to case 4 */
+                    rb_node_recolor_black(sibling->left);
+                    rb_node_recolor_red(sibling);
+                    rotate_right(t, sibling);
+                    sibling = doubly_black_parent->right;
+                }
+                /* case 4: far nephew red -> recolor and rotate; terminates the loop */
+                sibling->color = doubly_black_parent->color;
+                rb_node_recolor_black(doubly_black_parent);
+                rb_node_recolor_black(sibling->right);
+                rotate_left(t, doubly_black_parent);
+                doubly_black_node = t->root;
+            }
+        } else {
+            /* mirror of the above with left/right swapped */
+            struct rbnode *sibling = doubly_black_parent->left;
+
+            if (sibling->color == RB_RED) {
+                rb_node_recolor_black(sibling);
+                rb_node_recolor_red(doubly_black_parent);
+                rotate_right(t, doubly_black_parent);
+                sibling = doubly_black_parent->left;
+            }
+
+            if (effective_color(sibling->right) == RB_BLACK && effective_color(sibling->left) == RB_BLACK) {
+                rb_node_recolor_red(sibling);
+                doubly_black_node = doubly_black_parent;
+                doubly_black_parent = doubly_black_parent->parent;
+            } else {
+                if (effective_color(sibling->left) == RB_BLACK) {
+                    rb_node_recolor_black(sibling->right);
+                    rb_node_recolor_red(sibling);
+                    rotate_left(t, sibling);
+                    sibling = doubly_black_parent->left;
+                }
+                sibling->color = doubly_black_parent->color;
+                rb_node_recolor_black(doubly_black_parent);
+                rb_node_recolor_black(sibling->left);
+                rotate_right(t, doubly_black_parent);
+                doubly_black_node = t->root;
+            }
+        }
+    }
+
+    rb_node_recolor_black(doubly_black_node);
+}
+
+int rb_delete(rbtree_t *t, const char *key) {
+    struct rbnode *node_to_del = find_node_by_key(t, key);
+    if (node_to_del == NULL) {
+        return -1;
+    }
+
+    struct rbnode *spliced_node = node_to_del;
+    rb_color_t spliced_node_original_color = spliced_node->color;
+    struct rbnode *replacement_node;
+    struct rbnode *replacement_parent;
+
+    if (node_to_del->left == NULL) {
+        replacement_node = node_to_del->right;
+        replacement_parent = node_to_del->parent;
+        replace_in_parent(t, node_to_del, node_to_del->right);
+    } else if (node_to_del->right == NULL) {
+        replacement_node = node_to_del->left;
+        replacement_parent = node_to_del->parent;
+        replace_in_parent(t, node_to_del, node_to_del->left);
+    } else {
+        spliced_node = leftmost_node(node_to_del->right);
+        spliced_node_original_color = spliced_node->color;
+        replacement_node = spliced_node->right;
+
+        if (spliced_node->parent == node_to_del) {
+            replacement_parent = spliced_node;
+        } else {
+            replacement_parent = spliced_node->parent;
+            replace_in_parent(t, spliced_node, spliced_node->right);
+            spliced_node->right = node_to_del->right;
+            spliced_node->right->parent = spliced_node;
+        }
+
+        replace_in_parent(t, node_to_del, spliced_node);
+        spliced_node->left = node_to_del->left;
+        spliced_node->left->parent = spliced_node;
+        spliced_node->color = node_to_del->color;
+    }
+
+    free(node_to_del->key);
+    if (t->value_free != NULL) {
+        t->value_free(node_to_del->value);
+    }
+    free(node_to_del);
+    t->size--;
+
+    if (spliced_node_original_color == RB_BLACK) {
+        rb_delete_fixup(t, replacement_node, replacement_parent);
+    }
+
+    return 0;
 }
 size_t rb_size(const rbtree_t *t){
     return t->size;
