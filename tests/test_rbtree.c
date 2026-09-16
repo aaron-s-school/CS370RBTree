@@ -4,7 +4,7 @@
 #include <string.h>
 
 // TODO make check be against ordered array vals of similar operations
-
+// TODO tests for delete and for each
 static int failures = 0;
 
 #define CHECK(cond) do { \
@@ -118,6 +118,118 @@ static void test_size_tracks_inserts(void) {
     rb_destroy(t);
 }
 
+static void test_insert_fixup_line_ascending(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    const char *keys[] = { "10", "20", "30" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted and validated */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+        CHECK(rb_validate(t) == 0);
+    }
+    CHECK(rb_size(t) == n);
+
+    rb_destroy(t);
+}
+
+static void test_insert_fixup_line_descending(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    const char *keys[] = { "30", "20", "10" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted and validated */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+        CHECK(rb_validate(t) == 0);
+    }
+    CHECK(rb_size(t) == n);
+
+    rb_destroy(t);
+}
+
+static void test_insert_fixup_zigzag_left_right(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    const char *keys[] = { "30", "10", "20" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted and validated */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+        CHECK(rb_validate(t) == 0);
+    }
+    CHECK(rb_size(t) == n);
+
+    rb_destroy(t);
+}
+
+static void test_insert_fixup_zigzag_right_left(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    const char *keys[] = { "10", "30", "20" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted and validated */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+        CHECK(rb_validate(t) == 0);
+    }
+    CHECK(rb_size(t) == n);
+
+    rb_destroy(t);
+}
+
+static void test_insert_fixup_recolor_case(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    /* "5","3","8" builds a black root with two red children; inserting "1"
+     * under the red "3" hits a red uncle ("8"), forcing the recolor-and-climb
+     * case up to the root. */
+    const char *keys[] = { "5", "3", "8", "1" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted and validated */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+        CHECK(rb_validate(t) == 0);
+    }
+    CHECK(rb_size(t) == n);
+
+    rb_destroy(t);
+}
+
+static void test_insert_fixup_cascading_recolor(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    /* Two-digit keys keep lexicographic order equal to numeric order. This
+     * mixed build-then-fill-in sequence is long enough to force repeated and
+     * cascading rebalances (recolors and rotations) across multiple levels,
+     * not just a single fixup pass. */
+    const char *keys[] = {
+        "50", "25", "75", "10", "30", "60", "80",
+        "15", "27", "35", "65", "45"
+    };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted and validated */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+        CHECK(rb_validate(t) == 0);
+    }
+    CHECK(rb_size(t) == n);
+
+    rb_destroy(t);
+}
+
 /* Allocation-failure paths (rb_insert returning -1) aren't practically
  * testable without fault-injecting malloc, so they're intentionally not
  * covered here. */
@@ -136,6 +248,12 @@ static const test_case_t tests[] = {
     { "insert_borrowed_values_not_owned",         test_insert_borrowed_values_not_owned },
     { "validate_bst_ordering",                    test_validate_bst_ordering },
     { "size_tracks_inserts",                      test_size_tracks_inserts },
+    { "insert_fixup_line_ascending",              test_insert_fixup_line_ascending },
+    { "insert_fixup_line_descending",             test_insert_fixup_line_descending },
+    { "insert_fixup_zigzag_left_right",           test_insert_fixup_zigzag_left_right },
+    { "insert_fixup_zigzag_right_left",           test_insert_fixup_zigzag_right_left },
+    { "insert_fixup_recolor_case",                test_insert_fixup_recolor_case },
+    { "insert_fixup_cascading_recolor",           test_insert_fixup_cascading_recolor },
 };
 
 static const size_t num_tests = sizeof tests / sizeof tests[0];

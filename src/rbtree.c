@@ -16,7 +16,6 @@ struct rbnode {
 struct rbtree {
     struct rbnode   *root;
     size_t           size;
-    int              black_height;
     rb_value_free_fn value_free;
 };
 
@@ -28,27 +27,124 @@ rbtree_t *rb_create(rb_value_free_fn value_free) {
     t->root = NULL;
     t->size = 0;
     t->value_free = value_free;
-    t->black_height = 0;
     return t;
 }
+/* Precondition: x->right != NULL. Caller (future fixup) guarantees this. */
+static void rotate_left(rbtree_t *t, struct rbnode *x) {
+    struct rbnode *y = x->right;
+
+    x->right = y->left;
+    if (y->left != NULL) {
+        y->left->parent = x;
+    }
+
+    y->parent = x->parent;
+    if (x->parent == NULL) {
+        t->root = y;
+    } else if (x == x->parent->left) {
+        x->parent->left = y;
+    } else {
+        x->parent->right = y;
+    }
+
+    y->left = x;
+    x->parent = y;
+}
+
+/* Precondition: x->left != NULL. Caller (future fixup) guarantees this. */
+static void rotate_right(rbtree_t *t, struct rbnode *x) {
+    struct rbnode *y = x->left;
+
+    x->left = y->right;
+    if (y->right != NULL) {
+        y->right->parent = x;
+    }
+
+    y->parent = x->parent;
+    if (x->parent == NULL) {
+        t->root = y;
+    } else if (x == x->parent->right) {
+        x->parent->right = y;
+    } else {
+        x->parent->left = y;
+    }
+
+    y->right = x;
+    x->parent = y;
+}
+void rb_node_recolor_black(struct rbnode *node_to_color){
+    if(node_to_color == NULL){
+        return;
+    }
+    node_to_color->color = RB_BLACK;
+
+}
+void rb_node_recolor_red(struct rbnode *node_to_color){
+    if(node_to_color == NULL){
+        return;
+    }
+    node_to_color->color = RB_RED;
+
+}
+
+void rb_insert_fixup(rbtree_t *t, struct rbnode *inserted_node) {
+    struct rbnode *z = inserted_node;
+
+    /* invariant: the only possible violation is z red with z->parent red;
+     * root stays black at the top of every iteration, so z->parent red
+     * implies z->parent is not root and grandparent is non-NULL */
+    while (z->parent != NULL && z->parent->color == RB_RED) {
+        struct rbnode *parent = z->parent;
+        struct rbnode *grandparent = parent->parent;
+
+        if (parent == grandparent->left) {
+            struct rbnode *uncle = grandparent->right;
+            if (uncle != NULL && uncle->color == RB_RED) {
+                rb_node_recolor_black(parent);
+                rb_node_recolor_black(uncle);
+                rb_node_recolor_red(grandparent);
+                z = grandparent;
+            } else {
+                if (z == parent->right) {
+                    z = parent;
+                    rotate_left(t, z);
+                }
+                /* z's parent/grandparent may have changed by the rotation above */
+                parent = z->parent;
+                grandparent = parent->parent;
+                rb_node_recolor_black(parent);
+                rb_node_recolor_red(grandparent);
+                rotate_right(t, grandparent);
+            }
+        } else {
+            struct rbnode *uncle = grandparent->left;
+            if (uncle != NULL && uncle->color == RB_RED) {
+                rb_node_recolor_black(parent);
+                rb_node_recolor_black(uncle);
+                rb_node_recolor_red(grandparent);
+                z = grandparent;
+            } else {
+                if (z == parent->left) {
+                    z = parent;
+                    rotate_right(t, z);
+                }
+                parent = z->parent;
+                grandparent = parent->parent;
+                rb_node_recolor_black(parent);
+                rb_node_recolor_red(grandparent);
+                rotate_left(t, grandparent);
+            }
+        }
+    }
+
+    rb_node_recolor_black(t->root);
+}
+
+
 int rb_insert(rbtree_t *t, const char *key, void *value) {
     struct rbnode *parent = NULL;
     struct rbnode *cur = t->root;
     int cmp = 0;
-
-    /* invariant: cur is the still-unsearched subtree; parent trails it */
-    while (cur != NULL) {
-        cmp = strcmp(key, cur->key);
-        if (cmp == 0) {
-            if (t->value_free != NULL) {
-                t->value_free(cur->value);
-            }
-            cur->value = value;
-            return 0;
-        }
-        parent = cur;
-        cur = (cmp < 0) ? cur->left : cur->right;
-    }
 
     size_t key_len = strlen(key) + 1;
     char *key_copy = malloc(key_len);
@@ -56,7 +152,7 @@ int rb_insert(rbtree_t *t, const char *key, void *value) {
         return -1;
     }
     memcpy(key_copy, key, key_len);
-
+    
     struct rbnode *node = malloc(sizeof *node);
     if (node == NULL) {
         goto fail_node;
@@ -67,19 +163,45 @@ int rb_insert(rbtree_t *t, const char *key, void *value) {
     node->color = RB_RED;
     node->left = NULL;
     node->right = NULL;
-    node->parent = parent;
-
-    if (parent == NULL) {
+    
+    
+    if (cur == NULL) {
+        node->parent = NULL;
         t->root = node;
         node->color = RB_BLACK;
-        t->black_height++;
-    } else if (cmp < 0) {
+        t->size++;
+        return 0;
+
+    }
+
+    /* invariant: cur is the still-unsearched subtree; parent trails it */
+    while (cur != NULL) {
+        cmp = strcmp(key, cur->key);
+        if (cmp == 0) {
+            if (t->value_free != NULL) {
+                t->value_free(cur->value);
+            }
+            cur->value = value;
+            free(key_copy);
+            free(node);
+            return 0;
+        }
+        parent = cur;
+        cur = (cmp < 0) ? cur->left : cur->right;
+    }
+
+    node->parent = parent;
+
+    
+
+     if (cmp < 0) {
         parent->left = node;
     } else {
         parent->right = node;
     }
 
     t->size++;
+    rb_insert_fixup(t,node);
     return 0;
 
 fail_node:
@@ -131,6 +253,9 @@ int rb_validate(const rbtree_t *t) {
 
     size_t top = 0;
     struct rbnode *cur = t->root;
+    if(cur->color == RB_RED){
+        return -1;
+    }
     const char *prev_key = NULL;
     int result = 0;
 
@@ -144,6 +269,11 @@ int rb_validate(const rbtree_t *t) {
         if (prev_key != NULL && strcmp(prev_key, cur->key) >= 0) {
             result = -1;
             break;
+        }
+        if(cur->color == RB_RED && cur->parent !=NULL){
+            if(cur->parent->color == RB_RED){
+                return -1;
+            }
         }
         prev_key = cur->key;
         cur = cur->right;
