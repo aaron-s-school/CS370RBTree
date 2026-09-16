@@ -230,17 +230,26 @@ size_t rb_size(const rbtree_t *t){
     return t->size;
 
 }
+static void foreach_inorder(const struct rbnode *node,
+                             void (*fn)(const char *key, void *value, void *ctx),
+                             void *ctx) {
+    if (node == NULL) {
+        return;
+    }
+    /* in-order: left subtree, then this node, then right subtree, so fn
+     * sees keys in ascending sorted order */
+    foreach_inorder(node->left, fn, ctx);
+    fn(node->key, node->value, ctx);
+    foreach_inorder(node->right, fn, ctx);
+}
+
 void rb_foreach(const rbtree_t *t,
 void (*fn)(const char *key, void *value, void *ctx),
 void *ctx){
-    (void)t;
-    (void)fn;
-    (void)ctx;
-    return;
+    foreach_inorder(t->root, fn, ctx);
 }
-/* NOTE: only checks BST key ordering; root-color, red-red, and
- * black-height invariants are not yet checked (rb_insert has no
- * rebalancing yet, so those checks aren't meaningful until it does). */
+/* NOTE: only checks BST key ordering; root-color, and
+ * black-height invariants are not yet checked */
 int rb_validate(const rbtree_t *t) {
     //TODO check black height
     if (t->root == NULL) {

@@ -283,6 +283,88 @@ static void test_insert_no_stale_root_after_right_rotation(void) {
     rb_destroy(t);
 }
 
+typedef struct {
+    const char *keys[16];
+    void       *values[16];
+    size_t      count;
+} foreach_capture_t;
+
+static void foreach_capture_cb(const char *key, void *value, void *ctx) {
+    foreach_capture_t *cap = ctx;
+    cap->keys[cap->count] = key;
+    cap->values[cap->count] = value;
+    cap->count++;
+}
+
+static void test_foreach_visits_in_sorted_order(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    const char *keys[] = { "m", "f", "t", "a", "h", "p", "z", "c" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], NULL) == 0);
+    }
+
+    foreach_capture_t cap = { .count = 0 };
+    rb_foreach(t, foreach_capture_cb, &cap);
+
+    CHECK(cap.count == n);
+    /* invariant: cap.keys[0..i) are already known to be in strictly ascending order */
+    for (size_t i = 1; i < cap.count; i++) {
+        CHECK(strcmp(cap.keys[i - 1], cap.keys[i]) < 0);
+    }
+
+    rb_destroy(t);
+}
+
+static void test_foreach_values_match(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    const char *keys[] = { "m", "f", "t", "a", "h", "p", "z", "c" };
+    size_t n = sizeof keys / sizeof keys[0];
+
+    /* invariant: keys[0..i) have already been inserted, each valued by its own key pointer */
+    for (size_t i = 0; i < n; i++) {
+        CHECK(rb_insert(t, keys[i], (void *)keys[i]) == 0);
+    }
+
+    foreach_capture_t cap = { .count = 0 };
+    rb_foreach(t, foreach_capture_cb, &cap);
+
+    CHECK(cap.count == n);
+    /* invariant: cap.keys/cap.values[0..i) are already confirmed paired correctly;
+     * matched by content since cap.keys[i] is the tree's internal key copy,
+     * not the same pointer as the original keys[] literal */
+    for (size_t i = 0; i < cap.count; i++) {
+        const char *original = NULL;
+        for (size_t j = 0; j < n; j++) {
+            if (strcmp(keys[j], cap.keys[i]) == 0) {
+                original = keys[j];
+                break;
+            }
+        }
+        CHECK(original != NULL);
+        CHECK(cap.values[i] == (void *)original);
+    }
+
+    rb_destroy(t);
+}
+
+static void test_foreach_empty_tree_calls_nothing(void) {
+    rbtree_t *t = rb_create(NULL);
+    CHECK(t != NULL);
+
+    foreach_capture_t cap = { .count = 0 };
+    rb_foreach(t, foreach_capture_cb, &cap);
+    CHECK(cap.count == 0);
+
+    rb_destroy(t);
+}
+
 /* Allocation-failure paths (rb_insert returning -1) aren't practically
  * testable without fault-injecting malloc, so they're intentionally not
  * covered here. */
@@ -309,6 +391,9 @@ static const test_case_t tests[] = {
     { "insert_fixup_cascading_recolor",           test_insert_fixup_cascading_recolor },
     { "insert_no_stale_root_after_left_rotation", test_insert_no_stale_root_after_left_rotation },
     { "insert_no_stale_root_after_right_rotation", test_insert_no_stale_root_after_right_rotation },
+    { "foreach_visits_in_sorted_order",           test_foreach_visits_in_sorted_order },
+    { "foreach_values_match",                     test_foreach_values_match },
+    { "foreach_empty_tree_calls_nothing",         test_foreach_empty_tree_calls_nothing },
 };
 
 static const size_t num_tests = sizeof tests / sizeof tests[0];
